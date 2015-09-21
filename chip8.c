@@ -8,6 +8,11 @@
 
 #include "chip8.h"
 
+// TODO:
+// score font does not show
+// brix collision not detected
+// no sound
+
 
 int runChip8(Chip8 *chip8)
 {
@@ -17,7 +22,7 @@ int runChip8(Chip8 *chip8)
 	unsigned char *screenBit;
 	
 	while(!chip8->halt) {
-		
+		printf("%4X:", chip8->pc);
 		updateTimers(chip8);
 		
 		readInput(chip8);
@@ -57,22 +62,23 @@ int runChip8(Chip8 *chip8)
 			break;
 		
 		/* JP addr: Jump to location nnn */
-		case 0x1000:
+	        case 0x1000:
 			chip8->pc = addr;
 			break;
 		
 		/* Call addr: Call subroutine at nnn */
 		case 0x2000:
-			chip8->stack[++(chip8->sp)] = chip8->pc;
+			chip8->stack[++(chip8->sp)] = chip8->pc + 2;
 			chip8->pc = addr;
 			break;
 		
 		/* SE Vx, byte: Skip next instruction if Vx == kk */
 		case 0x3000:
-			if(chip8->rV[x] == byte)
+			if(chip8->rV[x] == byte) {
 				chip8->pc += 4;
-			else
+			} else{
 				chip8->pc += 2;
+			}
 			break;
 		
 		/* SNE Vx, byte: Skip next instruction if Vx != kk */
@@ -111,19 +117,19 @@ int runChip8(Chip8 *chip8)
 			
 			/* OR Vx, Vy: Set Vx = Vx OR Vy */
 			case 0x0001:
-				chip8->rV[x] = chip8->rV[x] | chip8->rV[y];
+				chip8->rV[x] |= chip8->rV[y];
 				chip8->pc += 2;
 				break;
 			
 			/* AND Vx, Vy: Set Vx = Vx AND Vy */
 			case 0x0002:
-				chip8->rV[x] = chip8->rV[x] & chip8->rV[y];
+				chip8->rV[x] &= chip8->rV[y];
 				chip8->pc += 2;
 				break;
 			
 			/* XOR Vx, Vy: Set Vx = Vx XOR Vy */
 			case 0x0003:
-				chip8->rV[x] = chip8->rV[x] ^ chip8->rV[y];
+				chip8->rV[x] ^= chip8->rV[y];
 				chip8->pc += 2;
 				break;
 			
@@ -131,7 +137,7 @@ int runChip8(Chip8 *chip8)
 			case 0x0004:
 				tmp = chip8->rV[x] + chip8->rV[y];
 				chip8->rV[x] = (unsigned char) tmp;
-				if(tmp > 255)
+				if(tmp > 0xFF)
 					chip8->rV[0xF] = 1;
 				else
 					chip8->rV[0xF] = 0;
@@ -209,14 +215,14 @@ int runChip8(Chip8 *chip8)
 				spriteByte = chip8->ram[chip8->rI + tmp];
 				for(tmp2=0; tmp2<8; ++tmp2) {
 					spriteBit = (spriteByte >> (7-tmp2)) & 0x1;
-					screenBit = &(chip8->videoMem[(((y + tmp) % SCREEN_HEIGHT) * SCREEN_WIDTH) + ((x + tmp2) % SCREEN_WIDTH)]);
+					screenBit = &(chip8->videoMem[(((chip8->rV[y] + tmp) % SCREEN_HEIGHT) * SCREEN_WIDTH) + ((chip8->rV[x] + tmp2) % SCREEN_WIDTH)]);
 					
-					if(*screenBit && !spriteBit) {
+					if(*screenBit && spriteBit) {
 						chip8->rV[0xf] = 1;
 					}
 					
 					*screenBit ^= spriteBit;
-				}
+			    }
 			}
 			
 			chip8->pc += 2;
@@ -312,8 +318,12 @@ int runChip8(Chip8 *chip8)
 			}	
 			break;
 		}
-		
-		//printf("%4X ", opcode);
+
+		// Debug
+		printf("%4X ", opcode);
+		if((opcode & 0xF000) == 0xD000) printf("\n");
+		//if(chip8->input) printf("%d\n", chip8->input);
+
 		draw(chip8);
 	}
 
@@ -326,27 +336,25 @@ void readInput(Chip8 *chip8)
 	SDL_Event event;
 	int key;
 	
-	chip8->input = 0;
-	
 	while(SDL_PollEvent(&event)) {
-		switch(event.type) {
-		case SDL_KEYDOWN:
+		if(event.type == SDL_KEYDOWN || event.type == SDL_KEYUP) {
 			key = event.key.keysym.sym;
 			
-			/* We set the input bit coresponding to the value of key  */
-			/* Numeric characters  */
-			if(key >= 48 && key <= 57)
-				chip8->input |= (short) pow(2, key-48);
+			/* Set the input bits */
+			if(key >= 48 && key <= 57) { // '0' to '9'
+				if(event.type == SDL_KEYDOWN)
+					chip8->input |= (short) pow(2, key-48);
+				else
+					chip8->input &= ~((short) pow(2, key-48));
+			} else if(key >= 97 && key <= 102) { // 'a' to 'f'
+				if(event.type == SDL_KEYDOWN)
+					chip8->input |= (short) pow(2, key-87);
+				else
+					chip8->input &= ~((short) pow(2, key-87));
+			}
 			
-			/* Letter from 'a' to 'f' */
-			if(key >= 97 && key <= 101)
-				chip8->input |= (short) pow(2, key-87);
-			
-			break;
-		
-		case SDL_QUIT:
+		}else if(event.type == SDL_QUIT) {
 			chip8->halt = 1;
-			break;
 		}
 	}
 }
@@ -354,8 +362,14 @@ void readInput(Chip8 *chip8)
 
 void updateTimers(Chip8 *chip8)
 {
-	if(chip8->rDelay > 0) chip8->rDelay--;
-	if(chip8->rSound > 0) chip8->rDelay--;
+	if(chip8->rDelay > 0) (chip8->rDelay)--;
+	if(chip8->rSound > 0) (chip8->rSound)--;
+}
+
+
+void playSound()
+{
+	//TODO
 }
 
 
@@ -375,7 +389,7 @@ void draw(Chip8 *chip8)
 	}
 	
 	SDL_Flip(chip8->screen);
-	SDL_Delay(16.667); // 60Hz
+	SDL_Delay(5); // 60Hz
 }
 
 
@@ -397,7 +411,9 @@ int init(Chip8 *chip8, const char *roomPath)
 		chip8->sp = -1; // The first call to a sub will increment sp and store the ret address at 0
 		chip8->pc = CODE_START;
 		memset(chip8->videoMem, 0, sizeof(chip8->videoMem));
+		memset(chip8->rV, 0, sizeof(chip8->rV));
 		chip8->input = 0;
+
 		
 		// Graphic stuff
 		SDL_Init(SDL_INIT_EVERYTHING);
@@ -421,6 +437,12 @@ int loadRom(Chip8 *chip8, const char *romPath)
 	
 	fread(chip8->ram + CODE_START, sizeof(unsigned char), chip8->romSize, fp);
 	
+	// TODO: Remove debug code
+	//int i;
+	//for(i=0; i<chip8->romSize/2; i+=2) {
+	//	printf("%4X ", (chip8->ram[CODE_START + i] << 8) | (chip8->ram[CODE_START + i + 1]));
+	//}
+	
 	fclose(fp);
 	return 0;
 }
@@ -431,7 +453,7 @@ int main(int argc, char **argv)
 	
 	Chip8 chip8;
 	
-	if(argc > 1) {
+	if(argc == 2) {
 		if(init(&chip8, argv[1]) == -1) {
 			return -1;
 		} else {
@@ -439,8 +461,7 @@ int main(int argc, char **argv)
 		}
 	}
 	
-	// TODO: Show usage
-	
+	printf("Usage: chip8 rom_file\n");
 	return 0;
 }
 
